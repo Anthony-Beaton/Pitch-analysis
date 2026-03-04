@@ -1,0 +1,457 @@
+---
+title: "How do pitch metrics (velocity and spin rate) influence effectiveness?"
+format: pdf
+editor: visual
+echo: false
+---
+
+## Organizing the data
+
+To quantify the effectiveness of each pitching group, we analyzed every pitch in the dataset (\~2.8 million) and focused on outcomes that represent successful results for the pitcher: specifically, **in-play outs** (including groundouts, flyouts, and other standard outs) and **strikeouts**. In order to do this, we need to group the pitches into categories/groups and group the at-bat outcomes as well.
+
+```{r}
+suppressPackageStartupMessages(library(dplyr))
+suppressPackageStartupMessages(library(ggplot2))
+suppressPackageStartupMessages(library(tidyr))
+suppressPackageStartupMessages(library(readr))
+suppressPackageStartupMessages(library(scales))
+suppressPackageStartupMessages(library(forcats))
+
+# Import the data quietly
+pitches_csv <- read_csv("pitches.csv (1).zip", show_col_types = FALSE)
+atbats_csv <- read_csv("atbats.csv.zip", show_col_types = FALSE)
+
+# Combine the datasets
+combined_data_sets <- pitches_csv %>%
+  inner_join(atbats_csv, by = "ab_id")
+
+# Bar graph of all pitch types by count
+ggplot(data = pitches_csv, aes(x = pitch_type)) +
+  geom_bar() +                   
+  labs(
+    title = "Results by Pitch",
+    x = "Type",              
+    y = "Number Thrown"        
+  ) +
+  theme_minimal()
+
+```
+
+This data set contains far too many individual pitch types, so in order to analyze the effectiveness, we group the pitches with similar characteristics into five categories: Fastballs, Curveballs, Sliders, Changeups/Splitters, as well as other/rare pitches (will not be analyzed).
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(scales)   # for percent_format()
+
+# 1. Create the pitch group column using the 2-letter codes
+combined_data_sets <- combined_data_sets %>%
+  mutate(
+    pitch_group = case_when(
+      # Fastballs group: FF, FC, FT, SI
+      pitch_type %in% c("FF", "FC", "FT", "SI")       ~ "Fastballs",
+      
+      # Curveballs group: CU, KC
+      pitch_type %in% c("CU", "KC")                   ~ "Curveballs",
+      
+      # Sliders group: SL
+      pitch_type == "SL"                              ~ "Sliders",
+      
+      # Changeup/Splitter group: CH, FS
+      pitch_type %in% c("CH", "FS")                   ~ "Changeup/Splitter",
+      
+      # Catch-all for anything else (IN, PO, KN, SC, EP, UN, etc.)
+      TRUE                                            ~ "Other / Rare"
+    )
+  )
+
+# 2. Summarize: count per group + calculate percentage
+pitch_summary <- combined_data_sets %>%
+  count(pitch_group) %>%
+  mutate(
+    percentage = n / sum(n) * 100,
+    perc_label = sprintf("%.1f%%", percentage)
+  ) %>%
+  # Order from highest to lowest percentage
+  mutate(pitch_group = forcats::fct_reorder(pitch_group, percentage, .desc = TRUE))
+
+# 3. Create the bar chart
+ggplot(pitch_summary, aes(x = pitch_group, y = percentage, fill = pitch_group)) +
+  
+  # Draw the bars
+  geom_col() +
+  
+  # Add percentage labels on top
+  geom_text(
+    aes(label = perc_label),
+    vjust = -0.4,                # slightly above bar
+    size = 4.5,
+    fontface = "bold"
+  ) +
+  
+  # Format y-axis as percentages
+  scale_y_continuous(
+    labels = percent_format(scale = 1),
+    expand = expansion(mult = c(0, 0.12))  # room for labels
+  ) +
+  
+  # Titles and styling
+  labs(
+    title = "Percentage of Pitches by Pitch Group",
+    subtitle = paste("Total pitches:", format(sum(pitch_summary$n), big.mark = ",")),
+    x = NULL,
+    y = "Percentage of All Pitches (%)"
+  ) +
+  
+  scale_fill_viridis_d(option = "plasma", begin = 0.2, end = 0.9) +
+  theme_minimal(base_size = 14) +
+  theme(
+    legend.position = "none",              # no legend needed
+    axis.text.x = element_text(angle = 0, hjust = 0.5),
+    plot.title = element_text(face = "bold")
+  )
+```
+
+Grouping pitches is important because it reduces the complexity of the dataset by combining similar pitch types into broader, more interpretable categories. This simplification allows patterns in velocity, spin rate, and outcomes to emerge more clearly, making comparisons across pitch types more meaningful and statistically reliable.
+
+```{r}
+library(ggplot2)
+
+ggplot(combined_data_sets, aes(x = event)) +
+  geom_bar() +
+  labs(
+    x = "Event",
+    y = "Count",
+    title = "Count of Events"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)
+  )
+
+```
+
+Event outcomes were grouped by combining individual play results into broader outcome categories. **In Play Outs** include groundouts, flyouts, line outs, popouts, double plays, forceouts, and all bunt-related outs; **Strikeouts** include both standard strikeouts and strikeout double plays; **Walks/HBP** include walks, intentional walks, hit by pitch, and catcher’s interference; and **Hits** include singles, doubles, triples, and home runs. This grouping standardizes event labels so each pitch outcome is classified into one consistent event group for analysis.
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(scales)
+
+# 1. Create the event group column
+combined_data_sets <- combined_data_sets %>%
+  mutate(
+    event_group = case_when(
+      event %in% c(
+        "Bunt Groundout",
+        "Bunt Line Out",
+        "Bunt Pop Out",
+        "Double Play",
+        "Flyout",
+        "Forceout",
+        "Grounded Into A Double Play",
+        "Ground Out",
+        "Line Out",
+        "Popout"
+      ) ~ "In-Play Outs",
+
+      event %in% c(
+        "Strikeout",
+        "Strikeout DP"
+      ) ~ "Strikeouts",
+
+      event %in% c(
+        "Walk",
+        "Intentional Walk",
+        "Hit By Pitch",
+        "Catcher's Interference"
+      ) ~ "Walks / HBP",
+
+      event %in% c(
+        "Single",
+        "Double",
+        "Triple",
+        "Home Run"
+      ) ~ "Hits",
+
+      TRUE ~ "Other / Rare"
+    )
+  )
+
+# 2. Summarize (excluding Other / Rare)
+event_summary <- combined_data_sets %>%
+  filter(event_group != "Other / Rare") %>%
+  count(event_group) %>%
+  mutate(
+    percentage = n / sum(n) * 100,
+    perc_label = sprintf("%.1f%%", percentage)
+  ) %>%
+  mutate(event_group = forcats::fct_reorder(event_group, percentage, .desc = TRUE))
+
+# 3. Create the bar chart (no total shown)
+ggplot(event_summary, aes(x = event_group, y = percentage, fill = event_group)) +
+  geom_col() +
+  geom_text(
+    aes(label = perc_label),
+    vjust = -0.4,
+    size = 4.5,
+    fontface = "bold"
+  ) +
+  scale_y_continuous(
+    labels = percent_format(scale = 1),
+    expand = expansion(mult = c(0, 0.12))
+  ) +
+  labs(
+    title = "Percentage of Plate Appearances by Event Group",
+    x = NULL,
+    y = "Percentage of All Events (%)"
+  ) +
+  scale_fill_viridis_d(option = "plasma", begin = 0.2, end = 0.9) +
+  theme_minimal(base_size = 14) +
+  theme(
+    legend.position = "none",
+    axis.text.x = element_text(angle = 0, hjust = 0.5),
+    plot.title = element_text(face = "bold")
+  )
+
+```
+
+# Analysis
+
+In order to analyze each pitch groups metics and their effectiveness, we divided the data into **velocity bins** of 3 mph (ranging from 75–110 mph) and **spin rate bins** of 300 rpm (ranging from 1200–4200 rpm). Within each bin, we calculated the total number of pitches and determined the **percentage of those pitches that resulted in an out**. The most effective velocity or spin rate for a given pitch group was defined as the bin that **produced the highest percentage of outs**, while also ensuring that only bins with a sufficient number of pitches (≥20) were considered to avoid statistical noise. This method allowed us to identify the pitch characteristics — both in terms of speed and spin — that were **most likely to produce an out**, thereby providing a quantitative measure of effectiveness for each pitch group.
+
+## velocity
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(scales)
+
+velocity_group_bins <- combined_data_sets %>%
+  filter(!is.na(start_speed),
+         !is.na(pitch_group),
+         pitch_group != "Other / Rare",
+         start_speed >= 75,
+         start_speed <= 110) %>%
+  mutate(
+    velocity_bin = cut(start_speed,
+                       breaks = seq(75, 111, by = 3),
+                       include.lowest = TRUE,
+                       right = FALSE),
+    is_out = event %in% c("Groundout", "Flyout", "Lineout", "Pop Out",
+                          "Double Play", "Forceout", "Grounded Into DP",
+                          "Strikeout", "Strikeout DP")
+  )
+
+# Total pitches per bin
+bin_totals <- velocity_group_bins %>%
+  group_by(velocity_bin) %>%
+  summarise(bin_total = n(), .groups = "drop")
+
+# Outs per pitch group per bin
+bin_group_stats <- velocity_group_bins %>%
+  group_by(pitch_group, velocity_bin) %>%
+  summarise(
+    group_total = n(),
+    group_outs = sum(is_out),
+    .groups = "drop"
+  ) %>%
+  # Remove bins with < 20 pitches for that pitch group
+  filter(group_total >= 20) %>%
+  left_join(bin_totals, by = "velocity_bin") %>%
+  mutate(
+    out_pct = group_outs / group_total * 100,
+    velocity_mid = (as.numeric(sub("\\[(\\d+),.*", "\\1", velocity_bin)) +
+                    as.numeric(sub(".*,\\s*(\\d+)\\)", "\\1", velocity_bin))) / 2
+  )
+
+# Plot
+ggplot(bin_group_stats, aes(x = velocity_mid, y = out_pct, color = pitch_group)) +
+  geom_line(linewidth = 1.2) +
+  geom_point(size = 2) +
+  scale_x_continuous(breaks = seq(75, 110, 3), limits = c(75, 110)) +
+  scale_y_continuous(labels = percent_format(scale = 1), limits = c(0, 100)) +
+  labs(
+    x = "Velocity (3 mph bins)",
+    y = "Percentage of Pitches Resulting in an Out",
+    title = "Effectiveness by Velocity and Pitch Group",
+    color = "Pitch Group"
+  ) +
+  theme_minimal() +
+  theme(
+    panel.grid.minor = element_blank()
+  )
+
+```
+
+The velocity plot illustrates how the likelihood of generating an out varies across pitch speeds for each pitch group. Each line represents a pitch group, with higher points indicating velocity ranges that are more effective at producing outs. By comparing these lines, we can identify which velocities are most successful for each pitch type in terms of inducing outs.
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+
+# Step 1: Bin velocities and flag outs
+velocity_group_bins <- combined_data_sets %>%
+  filter(!is.na(start_speed),
+         !is.na(pitch_group),
+         pitch_group != "Other / Rare",
+         start_speed >= 75,
+         start_speed <= 110) %>%
+  mutate(
+    # 3 mph bins
+    velocity_bin = cut(start_speed,
+                       breaks = seq(75, 111, by = 3),
+                       include.lowest = TRUE,
+                       right = FALSE),
+    is_out = event %in% c("Groundout", "Flyout", "Lineout", "Pop Out",
+                          "Double Play", "Forceout", "Grounded Into DP",
+                          "Strikeout", "Strikeout DP")
+  )
+
+# Step 2: Summarize per pitch group and velocity bin
+bin_group_stats <- velocity_group_bins %>%
+  group_by(pitch_group, velocity_bin) %>%
+  summarise(
+    total_pitches = n(),
+    effective_pitches = sum(is_out),
+    pct_effective = effective_pitches / total_pitches * 100,
+    .groups = "drop"
+  ) %>%
+  # Filter bins with at least 20 pitches
+  filter(total_pitches >= 20)
+
+# Step 3: Identify the most effective bin for each pitch group
+best_bins <- bin_group_stats %>%
+  group_by(pitch_group) %>%
+  slice_max(order_by = pct_effective, n = 1) %>%
+  ungroup() %>%
+  # Clean up column names
+  select(
+    Pitch = pitch_group,
+    Velocity_Bin = velocity_bin,
+    Percentage_Effective = pct_effective,
+    Total_Pitches = total_pitches,
+    Effective_Pitches = effective_pitches
+  ) %>%
+  mutate(
+    Percentage_Effective = round(Percentage_Effective, 1)
+  )
+
+# Step 4: View as a table
+best_bins
+
+```
+
+The velocity table summarizes the most effective pitch speeds for each pitch group. For **Fastballs**, pitches between \[102-105) had the highest overall effectiveness, with **\~77%** of pitches in this bin resulting in an out out of a total of 502 pitches, yield. For **Curveballs**, the most effective velocity range was \[87-90), with **\~73%** effectiveness. **Sliders** showed their highest effectiveness in the \[96-99) bin, producing **76%** outs. Finally, **Changeup/Splitters** were most effective at \[90-93), achieving **\~67%** effectiveness.
+
+## Spin Rate
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(scales)
+
+# Define spin rate breaks
+spin_breaks <- seq(1200, 4200, by = 300)
+
+spin_group_bins <- combined_data_sets %>%
+  filter(!is.na(spin_rate),
+         !is.na(pitch_group),
+         pitch_group != "Other / Rare",
+         spin_rate >= 1200,
+         spin_rate <= 4200) %>%
+  mutate(
+    spin_bin = cut(spin_rate, breaks = spin_breaks, include.lowest = TRUE, right = FALSE),
+    # Compute numeric midpoint for each bin using match() on breaks
+    spin_mid = as.numeric(spin_bin) %>% sapply(function(i) (spin_breaks[i] + spin_breaks[i + 1]) / 2),
+    is_out = event %in% c("Groundout", "Flyout", "Lineout", "Pop Out",
+                          "Double Play", "Forceout", "Grounded Into DP",
+                          "Strikeout", "Strikeout DP")
+  )
+
+# Summarize per pitch group and bin
+bin_group_stats <- spin_group_bins %>%
+  group_by(pitch_group, spin_bin, spin_mid) %>%
+  summarise(
+    total_pitches = n(),
+    effective_pitches = sum(is_out),
+    pct_effective = effective_pitches / total_pitches * 100,
+    .groups = "drop"
+  ) %>%
+  filter(total_pitches >= 20)
+
+# Plot
+ggplot(bin_group_stats, aes(x = spin_mid, y = pct_effective, color = pitch_group)) +
+  geom_line(linewidth = 1.2) +
+  geom_point(size = 2) +
+  scale_x_continuous(breaks = seq(1200, 4200, 300), limits = c(1200, 4200)) +
+  scale_y_continuous(labels = percent_format(scale = 1), limits = c(0, 100)) +
+  labs(
+    x = "Spin Rate (rpm, 300 rpm bins)",
+    y = "Percentage of Pitches Resulting in an Out",
+    title = "Out Percentage by Spin Rate Bin and Pitch Group",
+    color = "Pitch Group"
+  ) +
+  theme_minimal() +
+  theme(panel.grid.minor = element_blank())
+
+```
+
+Similar to the velocity plot, the spin rate plot shows how the likelihood of generating an out varies across different spin rates for each pitch group. Each line represents a pitch group, with higher points indicating spin rate ranges that are more effective at producing outs.
+
+```{r}
+library(dplyr)
+
+# Step 1: Bin spin rates and flag outs
+spin_group_bins <- combined_data_sets %>%
+  filter(!is.na(spin_rate),
+         !is.na(pitch_group),
+         pitch_group != "Other / Rare",
+         spin_rate >= 1200,
+         spin_rate <= 4200) %>%
+  mutate(
+    spin_bin = cut(spin_rate, breaks = seq(1200, 4500, by = 300), include.lowest = TRUE, right = FALSE),
+    is_out = event %in% c("Groundout", "Flyout", "Lineout", "Pop Out",
+                          "Double Play", "Forceout", "Grounded Into DP",
+                          "Strikeout", "Strikeout DP")
+  )
+
+# Step 2: Summarize per pitch group and spin bin
+bin_group_stats <- spin_group_bins %>%
+  group_by(pitch_group, spin_bin) %>%
+  summarise(
+    total_pitches = n(),
+    effective_pitches = sum(is_out),
+    pct_effective = effective_pitches / total_pitches * 100,
+    .groups = "drop"
+  ) %>%
+  # Only include bins with at least 20 pitches
+  filter(total_pitches >= 20)
+
+# Step 3: Identify the most effective spin bin per pitch group
+best_spin_bins <- bin_group_stats %>%
+  group_by(pitch_group) %>%
+  slice_max(order_by = pct_effective, n = 1) %>%
+  ungroup() %>%
+  # Clean up column names
+  select(
+    Pitch = pitch_group,
+    Spin_Rate_Bin = spin_bin,
+    Percentage_Effective = pct_effective,
+    Total_Pitches = total_pitches,
+    Effective_Pitches = effective_pitches
+  ) %>%
+  mutate(Percentage_Effective = round(Percentage_Effective, 1))
+
+# Step 4: View the table
+best_spin_bins
+
+```
+
+The spin rate table summarizes the most effective spin rates for each pitch group in terms of producing outs. For **Fastballs**, the spin rate range \[3900-4200) had the highest effectiveness, with \~**78%** of pitches in this bin resulting in an out out of a total of 87 pitches, yielding 68 effective pitches. For **Curveballs**, the most effective spin rate range was \[2400-2700), with **\~72%** effectiveness. **Sliders** showed their highest effectiveness in the \[1800-2100) bin, producing **\~70%** outs from 1015 pitches. Finally, **Changeup/Splitters** were most effective at \[3600-3900), achieving **\~71%** effectiveness.
+
+# Conclusion
+
+Our analysis revealed that pitch effectiveness varies significantly by both velocity and spin rate. For example, **Fastballs** were associated with the highest likelihood of generating outs (\~77% when thrown between 102-105 MPH), while other ranges showed comparatively lower effectiveness. The results also highlighted that certain pitch groups, such as **Curveballs**, tend to be generally more effective (average effectiveness of \~69% among all curveballs), particularly at higher velocities or spin rates (\~73% effective when thrown between 87-90 MPH), demonstrating that deviation from average metrics can enhance a pitch’s outcome. Overall, these findings provide a quantitative basis for understanding which pitch characteristics contribute most to out production.\
+While this study focused on velocity, spin rate, and broad pitch categories, further research could explore additional pitch characteristics such as movement, release point, or pitch sequencing, which may also influence effectiveness. Expanding the analysis to include batter tendencies or situational context — for example, base-out states or counts — could provide a deeper understanding of pitch strategy. Additionally, longitudinal studies across multiple seasons could reveal trends in pitch effectiveness over time, enabling more refined predictive models for pitching performance.
